@@ -1,3 +1,4 @@
+import { buildDrillTodo, decideConsultTransition } from '@/api/consult-flow'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
@@ -29,6 +30,9 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 }
 
 export function runAction(key: string, id: number, action: string): ActionResult {
+  if (key === 'consult') {
+    return runConsultAction(id, action)
+  }
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
   if (!target) {
@@ -54,6 +58,39 @@ export function runAction(key: string, id: number, action: string): ActionResult
   next[index] = updated
   saveRows(key, next)
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
+}
+
+// 专家会商：提交结论与取消会商共用 consult-flow.ts 里的一份判定，
+// 两个入口只是落的状态不同，校验与拦截结果完全一致。
+// 同一次操作只取一份快照，校验、状态推进、演练待办都从这份快照取数，
+// 参会专家在多处出现的也是同一份。
+function runConsultAction(id: number, action: string): ActionResult {
+  const rows = listRows('consult')
+  const decision = decideConsultTransition(rows, id, action)
+  if (!decision.ok) {
+    return { ok: false, message: decision.message }
+  }
+  const updated: EntryRow = {
+    ...decision.row,
+    status: decision.target,
+    pending: decision.target === '已组织',
+    abnormal: decision.target === '已取消',
+  }
+  saveRows(
+    'consult',
+    rows.map((row) => (Number(row.id) === id ? updated : row)),
+  )
+  if (action !== '提交结论') {
+    return { ok: true, message: `专家会商已${action}，当前状态「${decision.target}」` }
+  }
+  // 评估的结论反映到应急演练的待办：演练清单随之冒出一条待核项
+  const drillRows = listRows('drill')
+  const todo = buildDrillTodo(decision.row, drillRows)
+  saveRows('drill', [...drillRows, todo])
+  return {
+    ok: true,
+    message: `专家会商已提交结论，当前状态「已出结论」；应急演练清单新增待核项 ${String(todo['演练编号'])}`,
+  }
 }
 
 export function resetModule(key: string): PageResult {
