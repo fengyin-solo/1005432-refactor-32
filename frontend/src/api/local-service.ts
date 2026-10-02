@@ -1,9 +1,15 @@
+import { runConsultAction } from '@/api/consult-rules'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
+
+// 模块专用流转入口：登记了的模块走自己的统一判定（见对应规则文件），其余模块走通用流转。
+const ACTION_HANDLERS: Record<string, (id: number, action: string) => ActionResult> = {
+  consult: runConsultAction,
+}
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -29,6 +35,10 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 }
 
 export function runAction(key: string, id: number, action: string): ActionResult {
+  const handler = ACTION_HANDLERS[key]
+  if (handler) {
+    return handler(id, action)
+  }
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
   if (!target) {
